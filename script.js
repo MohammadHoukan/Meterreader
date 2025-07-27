@@ -152,7 +152,7 @@ function processAndRender(src) {
   dials.sort((a,b)=>a.x-b.x);
 
   const pattern = dialPatternSel().value; // 'alt-cw', 'all-cw', 'all-ccw'
-  const zeroOffset = deg(zeroOffsetInput().value || 0);
+  const zeroOffset = deg2rad(parseFloat(zeroOffsetInput().value || '0'));
 
   const digits = [];
   const fractions = [];
@@ -343,5 +343,6 @@ function drawPoint(ctx, x,y){ ctx.fillStyle='rgba(79,124,255,.9)'; ctx.beginPath
 function mean(arr){ return arr.reduce((a,b)=>a+b,0)/arr.length; }
 function median(arr){ const s=[...arr].sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
 function deg(d){ return d; }
+function deg2rad(d){ return d*Math.PI/180; }
 function rad2deg(r){ return r*180/Math.PI; }
 function toast(msg){ statusEl().textContent = msg; }

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analog Meter Reader (AU) — Camera + Client‑Side</title>
+
+  <!-- PWA manifest (optional) -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- OpenCV.js (WASM) -->
+  <!-- onOpenCvReady is defined in script.js -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();"></script>
+
+  <!-- App JS -->
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Analog Meter Reader (Australia)</h1>
+    <p class="sub">Reads five‑dial analog electricity meters entirely in your browser.</p>
+  </header>
+
+  <section id="controls" aria-label="Controls">
+    <div class="row">
+      <button id="startBtn" type="button">Start Camera</button>
+      <button id="stopBtn" type="button" disabled>Stop</button>
+      <button id="captureBtn" type="button" disabled>Capture &amp; Read</button>
+
+      <label class="switch" title="Toggle continuous live reading">
+        <input type="checkbox" id="liveToggle" />
+        <span class="slider" aria-hidden="true"></span>
+        <span class="label">Live Read</span>
+      </label>
+
+      <label class="file" title="Upload a photo instead of using the camera">
+        <input type="file" id="fileInput" accept="image/*" />
+        <span>or Upload Photo</span>
+      </label>
+    </div>
+
+    <div class="row small">
+      <label>Dial pattern
+        <select id="dialPattern">
+          <option value="alt-cw">Alternate CW/CCW (common)</option>
+          <option value="all-cw">All clockwise</option>
+          <option value="all-ccw">All counter‑clockwise</option>
+        </select>
+      </label>
+
+      <label>Zero offset (°)
+        <input type="number" id="zeroOffset" value="0" step="1" min="-30" max="30" />
+      </label>
+
+      <label>Debug overlay
+        <input type="checkbox" id="debugToggle" />
+      </label>
+    </div>
+  </section>
+
+  <main>
+    <div class="stage" aria-label="Camera preview and overlays">
+      <video id="videoInput" autoplay playsinline></video>
+      <canvas id="frameCanvas"></canvas>
+      <canvas id="overlayCanvas"></canvas>
+    </div>
+
+    <aside id="results" aria-live="polite">
+      <div id="status">Loading OpenCV.js…</div>
+
+      <div class="reading">
+        <div class="value" id="readingValue">—</div>
+        <div class="units">kWh</div>
+      </div>
+
+      <div id="digitsRow" class="digits"></div>
+
+      <details>
+        <summary>Advanced parameters</summary>
+        <div class="grid">
+          <label>Hough minRadius <input type="number" id="minR" value="28" /></label>
+          <label>Hough maxRadius <input type="number" id="maxR" value="62" /></label>
+          <label>Circle dp <input type="number" id="dp" value="1.2" step="0.1" /></label>
+          <label>Circle minDist <input type="number" id="minDist" value="50" /></label>
+          <label>param1 <input type="number" id="param1" value="80" /></label>
+          <label>param2 <input type="number" id="param2" value="32" /></label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="calibrateBtn" type="button">Manual Calibrate</button>
+        <button id="clearCalBtn" type="button">Clear Calibration</button>
+        <button id="snapshotBtn" type="button">Save Snapshot</button>
+      </div>
+    </aside>
+  </main>
+
+  <footer>
+    <p>
+      Runs fully client‑side. For best results: fill the frame with the five dials, steady hand, good lighting.
+      Camera access requires HTTPS (or localhost).
+    </p>
+  </footer>
+
+  <!-- Hidden canvas used for image uploads -->
+  <canvas id="uploadCanvas" class="hidden"></canvas>
+
+  <!-- Optional: register service worker for offline/PWA -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {/* ignore */});
+      });
+    }
+  </script>
+</body>
+</html>

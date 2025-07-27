@@ -32,17 +32,26 @@ const calibrateBtn = () => document.getElementById('calibrateBtn');
 const clearCalBtn = () => document.getElementById('clearCalBtn');
 const snapshotBtn = () => document.getElementById('snapshotBtn');
 
+// FIX: helper to obtain 2d context optimized for frequent readback
+function get2dCtx(canvas) {
+  return canvas.getContext('2d', { willReadFrequently: true });
+}
+
 // Calibration storage
 const CAL_KEY = 'au_meter_calibration_v1';
 let manualCenters = null; // [{x,y,r} * 5]
 
 function onOpenCvReady() {
-  cv['onRuntimeInitialized'] = () => {
-    cvReady = true;
-    statusEl().innerText = 'OpenCV.js is ready.';
-    wireUI();
-    restoreCalibration();
-  };
+  // FIX: ensure runtime is ready
+  if (!cvReady) {
+    cvReady = false;
+    cv['onRuntimeInitialized'] = () => {
+      cvReady = true;
+      statusEl().innerText = 'OpenCV.js is ready.';
+      wireUI();
+      restoreCalibration();
+    };
+  }
 }
 
 function wireUI() {
@@ -95,19 +104,18 @@ function resizeStage(w, h) {
 
 function onCapture() {
   if (!streaming) return;
-  const ctx = frameCanvas().getContext('2d');
+  const ctx = get2dCtx(frameCanvas()); // FIX: use helper with willReadFrequently
   ctx.drawImage(video(), 0, 0, frameCanvas().width, frameCanvas().height);
-  const src = cv.imread(frameCanvas());
-  processAndRender(src);
-  src.delete();
+  const imgData = ctx.getImageData(0, 0, frameCanvas().width, frameCanvas().height); // FIX: read ImageData
+  processAndRender(imgData);
 }
 
 function loop() {
   if (!liveMode || !streaming) return;
-  const ctx = frameCanvas().getContext('2d');
+  const ctx = get2dCtx(frameCanvas()); // FIX: use helper with willReadFrequently
   ctx.drawImage(video(), 0, 0, frameCanvas().width, frameCanvas().height);
-  const src = cv.imread(frameCanvas());
-  try { processAndRender(src); } finally { src.delete(); }
+  const imgData = ctx.getImageData(0, 0, frameCanvas().width, frameCanvas().height); // FIX: read ImageData
+  try { processAndRender(imgData); } finally { /* no mat to delete */ }
   rafId = requestAnimationFrame(loop);
 }
 
@@ -119,37 +127,56 @@ function onFile(e) {
   const img = new Image();
   img.onload = () => {
     uploadCanvas().width = img.width; uploadCanvas().height = img.height;
-    const ictx = uploadCanvas().getContext('2d');
+    const ictx = get2dCtx(uploadCanvas()); // FIX: use helper
     ictx.drawImage(img, 0, 0);
-    const src = cv.imread(uploadCanvas());
+    const imgData = ictx.getImageData(0, 0, uploadCanvas().width, uploadCanvas().height); // FIX: read ImageData
     resizeStage(img.width, img.height);
-    const fctx = frameCanvas().getContext('2d'); fctx.drawImage(img,0,0);
-    processAndRender(src);
-    src.delete();
+    const fctx = get2dCtx(frameCanvas()); fctx.drawImage(img,0,0);
+    processAndRender(imgData);
   };
   img.src = URL.createObjectURL(file);
 }
 
-function processAndRender(src) {
-  const dbg = debugToggle().checked ? overlayCanvas().getContext('2d') : null;
+function processAndRender(imageData) {
+  if (!cvReady) return; // FIX: wait for OpenCV runtime
+  const dbg = debugToggle().checked ? get2dCtx(overlayCanvas()) : null; // FIX: use helper
   if (dbg) { dbg.clearRect(0,0,overlayCanvas().width, overlayCanvas().height); }
 
-  let gray = new cv.Mat();
-  cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-  // Improve contrast & denoise while preserving edges
-  const clahe = new cv.CLAHE(2.0, new cv.Size(8,8));
-  clahe.apply(gray, gray); clahe.delete();
-  const tmp = new cv.Mat();
-  cv.bilateralFilter(gray, tmp, 7, 50, 50);
-  gray.delete();
-  gray = tmp;
+  let src = null, work = null, gray = null;
+  try {
+    src = cv.matFromImageData(imageData); // FIX: create Mat from ImageData
+    work = new cv.Mat();
+    if (src.type() === cv.CV_8UC4) {
+      cv.cvtColor(src, work, cv.COLOR_RGBA2RGB); // FIX: 4C -> 3C
+    } else if (src.type() === cv.CV_8UC3 || src.type() === cv.CV_8UC1) {
+      src.copyTo(work);
+    } else {
+      src.convertTo(work, cv.CV_8UC3);
+    }
 
-  let dials = manualCenters || detectDials(gray, dbg);
-  if (!dials || dials.length !== 5) {
-    updateUI(null, 'Could not detect 5 dials. Try manual calibration.');
+    gray = new cv.Mat();
+    if (work.type() === cv.CV_8UC3) cv.cvtColor(work, gray, cv.COLOR_RGB2GRAY); else work.copyTo(gray);
+
+    const clahe = new cv.CLAHE(2.0, new cv.Size(8,8));
+    clahe.apply(gray, gray); clahe.delete();
+    const tmp = new cv.Mat();
+
+    // FIX: validate bilateralFilter params
+    let d = Number(7), sigmaColor = Number(50), sigmaSpace = Number(50);
+    if (!Number.isFinite(d)) d = 9;
+    if (!Number.isFinite(sigmaColor) || sigmaColor <= 0) sigmaColor = 75;
+    if (!Number.isFinite(sigmaSpace)) sigmaSpace = 75;
+    if (d <= 0 && sigmaSpace <= 0) sigmaSpace = 75;
+
+    cv.bilateralFilter(gray, tmp, d, sigmaColor, sigmaSpace, cv.BORDER_DEFAULT);
     gray.delete();
-    return;
-  }
+    gray = tmp;
+
+    let dials = manualCenters || detectDials(gray, dbg);
+    if (!dials || dials.length !== 5) {
+      updateUI(null, 'Could not detect 5 dials. Try manual calibration.');
+      return;
+    }
 
   // Sort left->right
   dials.sort((a,b)=>a.x-b.x);
@@ -164,7 +191,7 @@ function processAndRender(src) {
     const roi = cropCircle(gray, d);
     const angle = detectPointerAngle(roi, dbg, d);
     roi.delete();
-    if (angle == null) { updateUI(null, `Pointer not found on dial ${i+1}`); gray.delete(); return; }
+    if (angle == null) { updateUI(null, `Pointer not found on dial ${i+1}`); return; }
 
     const cw = rotationForIndex(pattern, i); // true if clockwise numbering
     const {digit, frac} = angleToDigit(angle, cw, zeroOffset);
@@ -185,12 +212,17 @@ function processAndRender(src) {
   const reading = adj.reduce((acc, d, idx) => acc + d * Math.pow(10, 4-idx), 0);
   updateUI({reading, digits: adj}, null);
 
-  if (dbg) {
-    dbg.lineWidth = 2; dbg.strokeStyle = 'rgba(80,200,120,0.9)';
-    dials.forEach(d => { drawCircle(dbg, d.x, d.y, d.r); });
+    if (dbg) {
+      dbg.lineWidth = 2; dbg.strokeStyle = 'rgba(80,200,120,0.9)';
+      dials.forEach(d => { drawCircle(dbg, d.x, d.y, d.r); });
+    }
+  } catch (err) {
+    console.warn('bilateralFilter failed:', err); // FIX: readable error
+  } finally {
+    if (src) src.delete();
+    if (work) work.delete();
+    if (gray) gray.delete();
   }
-
-  gray.delete();
 }
 
 function detectDials(gray, dbg) {
@@ -313,7 +345,7 @@ function startManualCalibration() {
     const x = (e.clientX - rect.left) * (oc.width / rect.width);
     const y = (e.clientY - rect.top) * (oc.height / rect.height);
     pts.push({x,y});
-    drawPoint(oc.getContext('2d'), x, y);
+    drawPoint(get2dCtx(oc), x, y); // FIX: use helper context
     if (pts.length === 5) {
       oc.removeEventListener('click', handler);
       // Estimate radius as 90% of min distance between successive centers / 2

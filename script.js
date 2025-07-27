@@ -134,12 +134,15 @@ function processAndRender(src) {
   const dbg = debugToggle().checked ? overlayCanvas().getContext('2d') : null;
   if (dbg) { dbg.clearRect(0,0,overlayCanvas().width, overlayCanvas().height); }
 
-  const gray = new cv.Mat();
+  let gray = new cv.Mat();
   cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
   // Improve contrast & denoise while preserving edges
   const clahe = new cv.CLAHE(2.0, new cv.Size(8,8));
   clahe.apply(gray, gray); clahe.delete();
-  cv.bilateralFilter(gray, gray, 7, 50, 50);
+  const tmp = new cv.Mat();
+  cv.bilateralFilter(gray, tmp, 7, 50, 50);
+  gray.delete();
+  gray = tmp;
 
   let dials = manualCenters || detectDials(gray, dbg);
   if (!dials || dials.length !== 5) {

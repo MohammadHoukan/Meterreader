@@ -1,5 +1,10 @@
 # Meterreader
 
+A simple web-based meter reading application.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
 This project is a small client-side web app for reading five-dial analog electricity meters. It runs entirely in the browser and uses OpenCV.js for the image processing so no server is required.
 
 ## Setup
